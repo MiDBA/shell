@@ -1,0 +1,523 @@
+##!/bin/ksh
+# Run sql.file against all instances
+#set -x
+
+#Functions
+#getSrvctl - gets $SRVCTLINST populated with all DBs listed in srvctl
+#getPmon - gets $PMONINST popluated all DBs with pmon running and $PMONNUM as number of pmons running
+#runSql - uses $PMONINST with options 12345 and sql.file (2 args require)
+#runSqlplus -  Sets env and runs sql.file (1 arg required)
+#Sqlverbose -  For options 5&6 running in single DB/PDB only
+#getCdb -  gets CDB with populated with all CDBS
+#getPdb - gets PDB with populated with all PDBS
+#setEnv - sets up sqlplus use
+
+#parse command line input
+
+#echo $# #number of command line arguments
+#echo $@
+#echo $*
+
+parse_args()
+{
+while [ $# -gt 0 ]
+do
+    if [[ "$1" == -* ]]; then
+
+        #set run flag
+        export run="y"
+
+        #Conver all input to lower case
+        lwrarg=${ echo $1 | tr '[:upper:]' '[:lower:]' }
+        lwrvar=${ echo $2 | tr '[:upper:]' '[:lower:]' }
+
+        case "$lwrarg" in
+
+        -db) export db=$lwrvar;;                #Define DB name, not SID or PDB
+        -pdb) export pdb=$lwrvar;;              #Define PDB name
+        -dblink) export dblink=$lwrvar;;        #Define Database Link Name
+        -sch) export sch=$lwrvar;;              #Define Schema Name
+        -sid) export sid=$lwrvar;;              #Define SID, Not DB name or PDB
+        -test) export test="y";;                #If set, scripts should not run
+        -sql) export sql=$lwrvar;;              #Define Name of sql file to run
+        -log) export log=$lwrvar;;              #Define Name of output Log file
+        -ohome) export ohome=$lwrvar;;          #Define Oracle Home
+        -echo) export echo_variables="y";;      #If set, will echo all command line options to screen
+        -email) export email=$lwrvar;;          #Define email distribution list
+        -task) export task=$lwrvar;;            #Define task to complete
+        -format) export format=$lwrvar;;        #Define output format
+        -dir) export dir=$lwrvar;;              #Define destination directory
+        -cat) export cat=$lwrvar;;              #Define catalog usage
+        -chn) export chn=$lwrvar;;              #Define number of channels (parallel) to use
+        -incl) export incl=$lwrvar;;            #Define custom inputs
+        -ver) export ver="y";;                  #If set requests version number
+
+        esac
+    fi
+    shift
+
+done
+
+echo_vars ()
+{
+echo "##### COMMAND LINE ARGUMENTS #####"
+if [[ "$db" ]]; then echo db=$db; fi
+if [[ "$pdb" ]]; then echo pdb=$pdb; fi
+if [[ "$dblink" ]]; then echo dblink=$dblink; fi
+if [[ "$sch" ]]; then echo sch=$sch; fi
+if [[ "$sid" ]]; then echo sid=$sid; fi
+if [[ "$test" ]]; then echo test=$test; fi
+if [[ "$sql" ]]; then echo sql=$sql; fi
+if [[ "$log" ]]; then echo log=$log; fi
+if [[ "$ohome" ]]; then echo ohome=$ohome; fi
+if [[ "$echo_variables" ]]; then echo echo_variables=$echo_variables; fi
+if [[ "$email" ]]; then echo email=$email; fi
+if [[ "$task" ]]; then echo task=$task; fi
+if [[ "$format" ]]; then echo format=$format; fi
+if [[ "$dir" ]]; then echo dir=dir; fi
+if [[ "$cat" ]]; then echo cat=$cat; fi
+if [[ "$chn" ]]; then echo chn=$chn; fi
+if [[ "$incl" ]]; then echo incl=$incl; fi
+if [[ "$ver" ]]; then echo ver=$ver; fi
+echo DL LIST: $DL
+
+echo "##### ENVIRONMENT VARIABLES #####"
+echo NODE: $NODE
+echo HOSTNAME: $HOSTNAME
+echo Script name: $CALLING_PROC
+echo Script dir: $SCRIPTDIR
+echo Run Date: $RUNDATE
+echo Oracle Home: $ORACLE_HOME
+echo Path: $PATH
+}
+# Check for existance
+
+if [[ "$sql" ]]; then
+       if [ ! -e "$sql" ]; then
+                echo File: $sql not reachable
+                exit
+       fi
+fi
+
+if [[ "$dir" ]]; then
+       if [ ! -e "$dir" ]; then
+                echo Directory: $dir not reachable
+                exit
+       fi
+fi
+
+if [[ "$echo_variables" == "y" ]]; then
+        echo_vars
+fi
+}
+
+#parse_args $@
+
+
+checkInput()
+{
+#if [ $1 == "version" ]; then
+
+if [[ "$ver" ]]; then
+        if [ $ver == "y" ]; then
+                listVersions
+                exit
+        fi
+fi
+
+#if [ -z $1 ] || [ -z $2 ]; then
+#if [ -z $1 ]; then
+if [ ! "$run" ]; then
+        #clear
+        echo " "
+        echo Usage
+        echo  db_job -incl 12345 -sql sql_file.sql
+        echo " "
+        echo 1 - Run SQL in Version 11 DBs
+        echo 2 - Run SQL in Version 12 Container DBs Only
+        echo 3 - Run SQL in Version 12 PDBs
+        echo 4 - Run SQL in Version 12 Stand Alone DBs Only
+        echo 5 - Run SQL in Single Version 12 DB "(Only tested with get_pwd.sql)"
+        echo 6 - Run SQL in Single Version 12 PDB "(Only tested with get_pwd.sql)"
+        echo Any combination of 12345 can be used in any order in the -incl Argument
+        echo sql_file.sql can be any file name you choose
+        echo
+        exit
+#else
+#        if [ ! -e "$sql" ]; then
+#                echo $sql not reachable
+#                exit
+#        fi
+fi
+}
+
+echoInput()
+{
+if [[ $sql !=  *"get_pwd.sql"* ]]; then
+        #echo NODE: $NODE
+        if [[ ! "$dir" ]]; then echo Default Output Directory: `pwd`; fi
+        if [[ ! "$log" ]]; then echo Default spool to : `pwd`/$sql.spool; fi
+        #echo input: $1 $2 $3 $4 $5
+fi
+}
+
+setEnv()
+{
+HOSTNAME=`hostname`
+NODE=${HOSTNAME: -1}
+
+ORACLE_SID=dummy12
+ORAENV_ASK=NO
+export PATH=$PATH:$ORACLE_HOME/bin:/usr/local/bin/:/usr/sbin/
+. oraenv >/dev/null
+export PATH=$PATH:$ORACLE_HOME/bin
+OLD_ORA_PATH=$ORACLE_PATH
+unset ORACLE_PATH
+export CALLING_PROC=$(basename ${0})
+export SCRIPTDIR=$(dirname ${0})
+export RUNDATE=$(date "+%Y%m%d%H%M")
+cd $SCRIPTDIR
+}
+
+getSrvctl()
+{
+SRVCTLINST=`srvctl config database | while read a; do echo $a$NODE; done;`
+SRVNUM=`echo $SRVCTLINST | wc -w`
+#echo SRVCTL INSTANCES: $SRVNUM
+#for i in `echo $SRVCTLINST`; do
+#echo $i
+#done | sort -d
+}
+
+getPmon()
+{
+export PMONINST=`ps -efZ | grep [p]mon | grep -v asm | grep -v "+APX" | awk '{print $NF}' | sed s/ora_pmon_// | grep -v / | grep -v "-"`
+export PMONNUM=`echo $PMONINST | wc -w`
+
+if [[ "$echo_variables" == "y" ]]; then
+        echo Instances: $PMONINST
+fi
+
+}
+
+listVersions()
+{
+for INST in $PMONINST; do
+
+export ORACLE_SID=$INST
+. oraenv > /dev/null
+
+echo ORACLE_SID: $INST
+echo ORACLE_HOME: $ORACLE_HOME
+
+if [[ $ORACLE_HOME == *"11.2"* ]]; then
+        VERSION=11
+        PDB=''
+        echo Version: $VERSION
+        STDB="$STDB $INST"
+
+elif [[ $ORACLE_HOME = *"12.2"* ]]; then
+
+        getCdb
+
+        if [[ $CDB = *'YES'* ]]; then
+                VERSION="12c"
+                getPdb
+                echo Version: $VERSION
+                echo CDB: $CDB
+                ALLCDBS="$ALLCDBS $INST"
+                echo PDBS: $PDB
+                ALLPDBS="$ALLPDBS $PDB"
+        elif [[ $CDB = *'NO'* ]]; then
+                VERSION=12
+                echo Version: $VERSION
+                echo CDB: $CDB
+                NONCDBS="$NONCDBS $INST"
+        fi
+else
+        echo unknown ORACLE HOME
+fi
+echo " "
+done
+echo ALL 11 DBS $STDB
+echo ALL CDB $ALLCDBS
+echo ALL PDB $ALLPDBS
+echo ALL 12 NON-CDB $NONCDBS
+export $STDB
+export $ALLCDBS
+export $ALLPDBS
+export $NONCDBS
+}
+
+runSql()
+{
+
+#checkInput $1 $2 $3 $4 $5
+checkInput
+
+PINST=""
+
+for INST in $PMONINST; do
+
+export ORACLE_SID=$INST
+. oraenv > /dev/null
+
+if [[ $ORACLE_HOME == *"11.2"* ]]; then
+        VERSION=11
+        PDB=''
+        if [[ $incl == *"1"* ]]; then
+                echo runSqlplus $sql $INST
+                runSqlplus $sql
+        fi
+        #########Add option 5 for version 11
+
+elif [[ $ORACLE_HOME == *"12.2"* ]]; then
+
+        getCdb
+
+        if [[ $CDB = *'YES'* ]]; then
+                VERSION="12c"
+                getPdb
+
+                if [[ $incl == *"2"* ]]; then
+
+                echo runSqlplus $sql $INST
+                runSqlplus $sql
+
+                fi
+
+                if [[ $incl == *"3"* ]]; then
+
+                        for PINST in $PDB; do
+                                echo runSqlplus $sql $INST $PINST
+                                runSqlplus $sql
+                                PINST=""
+                        done
+                fi
+
+                if [[ $1 == "5" ]]; then
+                        if [ -z $3 ]; then
+                                echo "Need DBName OwnerName ObjectName"
+                                exit
+                        fi
+
+                        #echo Sqlverbose $2 $3 $4 $5
+                        PINST=""
+                        INST=$3
+                        Sqlverbose $2 $3 $4 $5
+                        exit
+                fi
+
+
+                if [[ $1 == "6" ]]; then
+                        if [ -z $3 ]; then
+                                echo "Need DBName OwnerName ObjectName"
+                                exit
+                        fi
+
+                        PINST=$3
+                        #echo runSqlplus $2 $INST $PINST
+                        #runSqlplus $2
+                        Sqlverbose $2 $3 $4 $5
+                        PINST=""
+                        exit
+                fi
+
+
+        elif [[ $CDB = *'NO'* ]]; then
+                VERSION=12
+                if [[ $incl == *"4"* ]]; then
+                        echo runSqlplus $sql $INST
+                        runSqlplus $sql
+                fi
+
+        fi
+#else
+        #echo unknown ORACLE HOME - WRONG
+fi
+done
+}
+
+getCdb()
+{
+CDB=$(
+sqlplus -s / as sysdba << EOF
+set head off
+set echo off
+set trim on
+set escape on
+set feedback off
+set errorlogging off
+select cdb from v\$database;
+EOF)
+}
+
+getPdb()
+{
+PDB=$(
+sqlplus -s / as sysdba << EOF
+set head off
+set echo off
+set trim on
+set escape on
+set feedback off
+set errorlogging off
+select name from v\$pdbs where name not like '%SEED%';
+EOF)
+}
+
+runSqlplus()
+{
+
+if [[ $PINST = "" ]]; then
+        export ORACLE_SID=$INST
+
+. oraenv >/dev/null
+echo ORACLE_SID=$ORACLE_SID
+#echo spool file=$1
+
+sqlplus -s / as sysdba << EOF
+set serveroutput off
+set feedback off
+set trimspool on
+set linesize 400
+set pagesize 0
+set tab off
+set termout off
+set trim on
+define sqlfile='$1'
+
+spool &&sqlfile..spool append
+        @&&sqlfile
+EOF
+
+fi
+
+if [[ $PINST != "" ]]; then
+        export ORACLE_SID=$INST
+
+. oraenv >/dev/null
+
+sqlplus -s / as sysdba << EOF
+set serveroutput off
+set verify off
+set head off
+set feedback off
+set trimspool on
+set linesize 400
+set pagesize 0
+set tab off
+set echo off
+set termout off
+set trim on
+define sqlfile='$1'
+define SESSPDB='$PINST'
+
+        alter session set container=&&SESSPDB;
+
+        spool &&sqlfile..spool append
+                @&&sqlfile
+EOF
+
+fi
+}
+
+Sqlverbose()
+{
+
+if [[ $PINST = "" ]]; then
+        export ORACLE_SID=$INST
+
+. oraenv >/dev/null
+
+sqlplus -s / as sysdba << EOF
+set verify off
+set head off
+set feedback off
+set trimspool on
+set pagesize 0
+define sqlfile='$1'
+define ownr='$3'
+define obj='$4'
+
+        @&&sqlfile
+EOF
+
+fi
+
+if [[ $PINST != "" ]]; then
+export ORACLE_SID=$INST
+#echo "$INST"
+. oraenv >/dev/null
+
+sqlplus -s / as sysdba << EOF
+--set serveroutput on
+set verify off
+set head off
+set feedback off
+set trimspool on
+--set linesize 400
+set pagesize 0
+--set tab off
+--set echo off
+--set termout off
+define sqlfile='$1'
+define ownr='$3'
+define obj='$4'
+define SESSPDB='$PINST'
+
+        alter session set container=&&SESSPDB;
+
+        @&&sqlfile
+
+        --select pnote from system.pwd
+        --where upper(ISCURRENT)='Y'
+        --and upper(owner)=upper('&&ownr')
+        --and upper(object_name)=upper('&&obj');
+
+EOF
+
+fi
+}
+
+sendMail()
+{
+if [[ "$email" ]]; then
+        if [[ "$email" != "dl" ]]; then
+                echo "To: $email">mailheader
+                echo "Subject: $sql $HOSTNAME $RUNDATE">>mailheader
+                echo "Content-Type: text/plain">>mailheader
+                echo " " >> $sql.spool
+                #echo "Instances Running: " $PMONINST >> $sql.spool
+                cat mailheader $sql.spool | sendmail -t
+                mv $sql.spool $SCRIPTDIR/logs/$sql.spool.$RUNDATE
+        else
+                echo "To: $DL">mailheader
+                echo "Subject: $sql $HOSTNAME $RUNDATE">>mailheader
+                echo "Content-Type: text/html">>mailheader
+                echo $PMONINST >> $sql.spool
+                cat mailheader $sql.spool | sendmail -t
+                mv $sql.spool $SCRIPTDIR/logs/$sql.spool.$RUNDATE
+        fi
+fi
+}
+
+cleanUp()
+{
+## Delete logs over 30 days old
+find $SCRIPTDIR/logs/  -mtime +30 -ls -exec rm {} \;
+}
+
+
+setEnv
+parse_args $@
+getPmon
+echoInput
+runSql
+sendMail
+cleanUp
+
+
+
+
+export ORACLE_PATH=$OLD_ORA_PATH
