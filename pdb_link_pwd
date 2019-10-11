@@ -1,0 +1,262 @@
+pdb_link_pwd -db cdb1dv -pdb salx1dv -sch ccf_sacwis -dblink sacwisqa
+
+#!/bin/ksh
+#set -x
+
+#grant needed permissions to manager db links
+#proxy to db link owner and manager db link
+#revoke privs and users
+
+while [ $# -gt 0 ]
+do
+    if [[ "$1" == -* ]]; then
+
+        #Conver all input to lower case
+        lwrarg=${ echo $1 | tr '[:upper:]' '[:lower:]' }
+        lwrvar=${ echo $2 | tr '[:upper:]' '[:lower:]' }
+
+        case "$lwrarg" in
+
+        -db) export db=$lwrvar;;
+        -pdb) export pdb=$lwrvar;;
+        -dblink) export dblink=$lwrvar;;
+        -sch) export sch=$lwrvar;;
+        -sid) export sid=$lwrvar;;
+        -test) export test="y";;
+        -sql) export sql=$lwrvar;;
+        -log) export log=$lwrvar;;
+        -ohome) export ohome=$lwrvar;;
+        -echo) export echo_variables="y";;
+
+        esac
+    fi
+    shift
+
+done
+
+echo_vars ()
+{
+echo Variables Set
+echo db=$db
+echo pdb=$pdb
+echo dblink=$dblink
+echo sch=$sch
+echo sid=$sid
+echo test=$test
+echo sql=$sql
+echo log=$log
+echo ohome=$ohome
+echo echo_variables=$echo_variables
+}
+
+if [[ "$echo_variables" == "y" ]]; then
+        echo_vars
+fi
+
+if [ -z $db ] || [ -z $pdb ] || [ -z $dblink ] || [ -z $sch ];
+then
+        echo Usage: pdb_link_pwd -db cdb_name -pdb pdb_name -sch dblink_owner -dblink dblink_name
+        echo Make sure dblink password is in pwd table
+        echo DB Link must already exist, this utility only changes the password
+else
+
+
+OLD_ORA_PATH=$ORACLE_PATH
+unset ORACLE_PATH
+
+#Define Arguments
+dbname=$db
+pdb_name=$pdb
+dblink_owner=$sch
+dblink_name=$dblink
+dblink_pwd=$(/u02/users/lowej5/scripts/db_funcs 6 /u02/users/lowej5/scripts/get_pwd.sql $pdb $sch $dblink)
+#echo dblink_pwd=$dblink_pwd
+maint_pwd=`openssl rand -base64 18`
+
+SCRIPT_DIR=/u02/users/lowej5/scripts
+cd $SCRIPT_DIR
+export PATH=$PATH:/usr/sbin/:/usr/local/bin/
+HOSTNAME=`hostname`
+NODE=${HOSTNAME: -1}
+export ORACLE_SID=$dbname$NODE
+export ORAENV_ASK=NO
+#/usr/local/bin/oraenv
+. oraenv
+
+uexist=$(
+sqlplus -s / as sysdba << EOF
+set serveroutput off
+set verify off
+set head off
+set feedback off
+set trimspool on
+set linesize 400
+set pagesize 0
+set tab off
+set echo off
+set termout off
+set trim on
+set errorlogging off
+define pdb_name='$pdb_name'
+alter session set container=&&pdb_name;
+select username from SYS.dba_users where username='PASSWDMAINT';
+EOF)
+
+#echo USER EXISTS $uexist
+
+echo NODE: $NODE
+echo ORACLE_HOME: $ORACLE_HOME
+echo SID: $ORACLE_SID
+echo PDB: $pdb_name
+echo DB Link Owner: $dblink_owner
+echo DB Link Name: $dblink_name
+#echo New DB Link Password: $dblink_pwd
+#echo Password for passwdmaint user: $maint_pwd
+
+#create passwdmaint user and grant privs
+
+if [[ $uexist = "" ]]; then
+        sqlplus -s / as sysdba << EOF
+        set serveroutput off
+        set verify off
+        set head off
+        set feedback off
+        set trimspool on
+        set linesize 400
+        set pagesize 0
+        set tab off
+        set echo off
+        set termout off
+        set trim on
+
+define passwd='$maint_pwd'
+define owner='$dblink_owner'
+define pdb_name='$pdb_name'
+
+spool db_link_pwd.log
+
+alter session set container=&&pdb_name;
+
+create user passwdmaint identified by "&&passwd";
+alter user &&owner  grant connect through passwdmaint;
+grant create database link to &&owner;
+
+EOF
+
+else
+        sqlplus -s / as sysdba << EOF
+        set serveroutput off
+        set verify off
+        set head off
+        set feedback off
+        set trimspool on
+        set linesize 400
+        set pagesize 0
+        set tab off
+        set echo off
+        set termout off
+        set trim on
+
+define passwd='$maint_pwd'
+define owner='$dblink_owner'
+define pdb_name='$pdb_name'
+
+spool db_link_pwd.log
+
+alter session set container=&&pdb_name;
+
+drop user passwdmaint cascade;
+create user passwdmaint identified by "&&passwd";
+alter user &&owner  grant connect through passwdmaint;
+grant create database link to &&owner;
+
+EOF
+
+fi
+
+
+
+#DB link maintenance as passwdmaint
+
+#echo sqlplus -s passwdmaint[$dblink_owner]/\"$maint_pwd\"@$HOSTNAME:1521/$pdb_name.michigan.gov
+sqlplus -s passwdmaint[$dblink_owner]/\"$maint_pwd\"@$HOSTNAME:1521/$pdb_name.michigan.gov 1>/dev/null << EOF
+
+set serveroutput off
+set verify off
+set head off
+set feedback off
+set trimspool on
+set linesize 400
+set pagesize 0
+set tab off
+set echo off
+set termout on
+set trim on
+set appinfo off
+
+define owner='$dblink_owner'
+define dblink='$dblink_name'
+define dblinkpwd='$dblink_pwd'
+define sql=''
+
+spool create_db_link.sql
+select 'create database link '||db_link||' connect to '||username||' identified by "&&dblinkpwd" using '''||host||''';' from user_db_links where lower(db_link) like lower('&&dblink%');
+spool off
+EOF
+
+echo "Running work"
+sqlplus passwdmaint[$dblink_owner]/\"$maint_pwd\"@$HOSTNAME:1521/$pdb_name.michigan.gov << EOF
+define owner='$dblink_owner'
+define dblink='$dblink_name'
+define dblinkpwd='$dblink_pwd'
+define sql=''
+
+
+set serveroutput on
+set verify on
+set head on
+set feedback on
+set trimspool on
+set linesize 400
+set pagesize 400
+set tab on
+set echo on
+set termout off
+set trim on
+set appinfo on
+--spool db_link_pwd.log append
+
+drop database link &&dblink..michigan.gov;
+prompt
+prompt Recreating DB Link
+prompt
+@create_db_link.sql
+prompt
+
+prompt TESTING DB LINK
+select * from dual@&&dblink..michigan.gov;
+EOF
+
+echo remove  passwdmaint user and revoke privs
+
+sqlplus -s / as sysdba << EOF
+
+define passwd='$maint_pwd'
+define owner='$dblink_owner'
+define pdb_name='$pdb_name'
+
+spool db_link_pwd.log append
+alter session set container=&&pdb_name;
+
+drop user passwdmaint cascade;
+revoke create database link from &&owner;
+
+EOF
+
+#rm create_db_link.sql
+tstamp=$(date "+%Y%m%d%H%M")
+mv create_db_link.sql create_db_link.$tstamp
+export ORACLE_PATH=$OLD_ORA_PATH
+
+fi;
+
