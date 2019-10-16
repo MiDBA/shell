@@ -1,0 +1,97 @@
+#!/bin/ksh
+
+
+export calling_proc=$(basename ${0})
+
+if [[ -z $lock_file ]]; then
+        echo "setting lock file name = "$calling_proc.lck
+        export lock_file=$calling_proc.lck
+else
+        echo "user set lock file name = " $lock_file
+fi
+
+
+export lock_file_dir=/etdc12_u03/batch/admin/file_locks
+export lock_file_ref=$lock_file_dir/$lock_file
+export script_dir=/etdc12_u03/batch/admin/functions
+#export locked=''
+
+
+#Show lock file status
+lock_status ()
+{
+if [[ $locked = "y" ]]; then
+        echo "lock_status() lock file contents:"
+        echo
+        cat $lock_file_ref
+else
+        echo "lock_status()" $locked
+fi
+}
+
+
+#Check for existing lock file
+check_lock ()
+{
+#echo "check_lock()" $lock_file_ref
+# use test -s if checking for file size greater than 0
+if test -f  $lock_file_ref
+then
+        echo "check_lock()" $lock_file_ref found
+        export locked='y'
+        lock_status
+
+else
+        echo "check_lock()" $lock_file_ref NOT found
+        export locked='n'
+        lock_status
+fi
+}
+
+
+#Create lock file
+create_lock ()
+{
+if test -f  $lock_file_ref
+then
+        echo "create_lock() Lock file already Exists --- Aborting"
+        export locked='y'
+else
+        export locked='y'
+
+        echo "create_lock() Creating lock file" $lock_file_ref
+        lock_time=`date`
+        echo "Lock Created" > $lock_file_ref
+        echo $lock_time >> $lock_file_ref
+        script_pwd=`pwd`
+        echo by >> $lock_file_ref
+        echo $script_pwd/$calling_proc >> $lock_file_ref
+        echo " " >> $lock_file_ref
+fi
+}
+
+
+
+#More lock file, optionally dump to log file
+remove_lock ()
+{
+if test -f  $lock_file_ref
+then
+        echo "Removing lock file" $lock_file_ref
+        rm $lock_file_ref
+        export locked='n'
+else
+        echo "Lock file does not exist"
+        export locked='n'
+fi
+}
+
+monitor_lock ()
+{
+echo wip
+echo will spawn processes to monitor parent or calling app
+}
+
+#create_lock
+#check_lock
+#remove_lock
