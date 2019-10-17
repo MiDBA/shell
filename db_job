@@ -23,9 +23,9 @@ parse_args()
 while [ $# -gt 0 ]
 do
     if [[ "$1" == -* ]]; then
-
-        #set run flag
-        export run="y"
+	
+	#set run flag
+	export run="y"
 
         #Conver all input to lower case
         lwrarg=${ echo $1 | tr '[:upper:]' '[:lower:]' }
@@ -49,8 +49,8 @@ do
         -dir) export dir=$lwrvar;;              #Define destination directory
         -cat) export cat=$lwrvar;;              #Define catalog usage
         -chn) export chn=$lwrvar;;              #Define number of channels (parallel) to use
-        -incl) export incl=$lwrvar;;            #Define custom inputs
-        -ver) export ver="y";;                  #If set requests version number
+	-incl) export incl=$lwrvar;;		#Define custom inputs
+	-ver) export ver="y";;           	#If set requests version number
 
         esac
     fi
@@ -74,13 +74,13 @@ if [[ "$echo_variables" ]]; then echo echo_variables=$echo_variables; fi
 if [[ "$email" ]]; then echo email=$email; fi
 if [[ "$task" ]]; then echo task=$task; fi
 if [[ "$format" ]]; then echo format=$format; fi
-if [[ "$dir" ]]; then echo dir=dir; fi
+if [[ "$dir" ]]; then echo dir=$dir; fi
 if [[ "$cat" ]]; then echo cat=$cat; fi
 if [[ "$chn" ]]; then echo chn=$chn; fi
 if [[ "$incl" ]]; then echo incl=$incl; fi
 if [[ "$ver" ]]; then echo ver=$ver; fi
 echo DL LIST: $DL
-
+	
 echo "##### ENVIRONMENT VARIABLES #####"
 echo NODE: $NODE
 echo HOSTNAME: $HOSTNAME
@@ -119,10 +119,10 @@ checkInput()
 #if [ $1 == "version" ]; then
 
 if [[ "$ver" ]]; then
-        if [ $ver == "y" ]; then
-                listVersions
-                exit
-        fi
+	if [ $ver == "y" ]; then
+		listVersions
+		exit
+	fi
 fi
 
 #if [ -z $1 ] || [ -z $2 ]; then
@@ -154,10 +154,10 @@ fi
 echoInput()
 {
 if [[ $sql !=  *"get_pwd.sql"* ]]; then
-        #echo NODE: $NODE
-        if [[ ! "$dir" ]]; then echo Default Output Directory: `pwd`; fi
-        if [[ ! "$log" ]]; then echo Default spool to : `pwd`/$sql.spool; fi
-        #echo input: $1 $2 $3 $4 $5
+	#echo NODE: $NODE	
+	if [[ ! "$dir" ]]; then echo Default Output Directory: `pwd`; fi
+	if [[ ! "$log" ]]; then echo Default spool to : `pwd`/$sql.spool; fi
+	#echo input: $1 $2 $3 $4 $5
 fi
 }
 
@@ -195,7 +195,7 @@ export PMONINST=`ps -efZ | grep [p]mon | grep -v asm | grep -v "+APX" | awk '{pr
 export PMONNUM=`echo $PMONINST | wc -w`
 
 if [[ "$echo_variables" == "y" ]]; then
-        echo Instances: $PMONINST
+	echo Instances: $PMONINST        
 fi
 
 }
@@ -216,7 +216,7 @@ if [[ $ORACLE_HOME == *"11.2"* ]]; then
         echo Version: $VERSION
         STDB="$STDB $INST"
 
-elif [[ $ORACLE_HOME = *"12.2"* ]]; then
+elif [[ $ORACLE_HOME = *"12"* ]]; then
 
         getCdb
 
@@ -243,10 +243,10 @@ echo ALL 11 DBS $STDB
 echo ALL CDB $ALLCDBS
 echo ALL PDB $ALLPDBS
 echo ALL 12 NON-CDB $NONCDBS
-export $STDB
-export $ALLCDBS
-export $ALLPDBS
-export $NONCDBS
+#export $STDB
+#export $ALLCDBS
+#export $ALLPDBS
+#export $NONCDBS
 }
 
 runSql()
@@ -269,9 +269,9 @@ if [[ $ORACLE_HOME == *"11.2"* ]]; then
                 echo runSqlplus $sql $INST
                 runSqlplus $sql
         fi
-        #########Add option 5 for version 11
+	#########Add option 5 for version 11
 
-elif [[ $ORACLE_HOME == *"12.2"* ]]; then
+elif [[ $ORACLE_HOME == *"12"* ]]; then
 
         getCdb
 
@@ -300,27 +300,27 @@ elif [[ $ORACLE_HOME == *"12.2"* ]]; then
                                 echo "Need DBName OwnerName ObjectName"
                                 exit
                         fi
-
+			
                         #echo Sqlverbose $2 $3 $4 $5
-                        PINST=""
-                        INST=$3
-                        Sqlverbose $2 $3 $4 $5
+			PINST=""
+			INST=$3
+			Sqlverbose $2 $3 $4 $5
                         exit
                 fi
 
+			
+		if [[ $1 == "6" ]]; then
+			if [ -z $3 ]; then		
+				echo "Need DBName OwnerName ObjectName"
+				exit
+			fi
 
-                if [[ $1 == "6" ]]; then
-                        if [ -z $3 ]; then
-                                echo "Need DBName OwnerName ObjectName"
-                                exit
-                        fi
-
-                        PINST=$3
+			PINST=$3
                         #echo runSqlplus $2 $INST $PINST
                         #runSqlplus $2
-                        Sqlverbose $2 $3 $4 $5
+			Sqlverbose $2 $3 $4 $5
                         PINST=""
-                        exit
+			exit
                 fi
 
 
@@ -470,7 +470,7 @@ define SESSPDB='$PINST'
 
         @&&sqlfile
 
-        --select pnote from system.pwd
+	--select pnote from system.pwd
         --where upper(ISCURRENT)='Y'
         --and upper(owner)=upper('&&ownr')
         --and upper(object_name)=upper('&&obj');
@@ -483,25 +483,25 @@ fi
 sendMail()
 {
 if [[ "$email" ]]; then
-        if [[ "$email" != "dl" ]]; then
-                echo "To: $email">mailheader
-                echo "Subject: $sql $HOSTNAME $RUNDATE">>mailheader
-                echo "Content-Type: text/plain">>mailheader
-                echo " " >> $sql.spool
-                #echo "Instances Running: " $PMONINST >> $sql.spool
-                cat mailheader $sql.spool | sendmail -t
-                mv $sql.spool $SCRIPTDIR/logs/$sql.spool.$RUNDATE
-        else
+	if [[ "$email" != "dl" ]]; then
+		echo "To: $email">mailheader
+		echo "Subject: $sql $HOSTNAME $RUNDATE">>mailheader
+		echo "Content-Type: text/plain">>mailheader
+		echo " " >> $sql.spool
+		#echo "Instances Running: " $PMONINST >> $sql.spool
+		cat mailheader $sql.spool | sendmail -t
+		mv $sql.spool $SCRIPTDIR/logs/$sql.spool.$RUNDATE
+	else
                 echo "To: $DL">mailheader
                 echo "Subject: $sql $HOSTNAME $RUNDATE">>mailheader
                 echo "Content-Type: text/html">>mailheader
-                echo $PMONINST >> $sql.spool
+		echo $PMONINST >> $sql.spool
                 cat mailheader $sql.spool | sendmail -t
                 mv $sql.spool $SCRIPTDIR/logs/$sql.spool.$RUNDATE
-        fi
+	fi
 fi
 }
-
+	
 cleanUp()
 {
 ## Delete logs over 30 days old
@@ -515,9 +515,10 @@ getPmon
 echoInput
 runSql
 sendMail
-cleanUp
+#cleanUp
 
 
 
 
 export ORACLE_PATH=$OLD_ORA_PATH
+
