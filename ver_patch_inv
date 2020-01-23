@@ -1,0 +1,16 @@
+echo mount homes
+df -h /u0*
+
+echo Ora Inventory
+cat /etc/oraInst.loc | grep inventory_loc | grep -v "^#" | sed 's/inventory_loc=//'
+
+echo Running Instances
+ps -ef | grep [p]mon | awk '{print $NF}' | cut -d'_' -f3
+
+echo Oratab Homes
+cat /etc/oratab | grep -v "^#" | sed '/^$/d' | cut -d':' -f2 | sort | uniq
+echo OraInventory Homes
+for a in $(cat /etc/oraInst.loc | grep inventory_loc | grep -v "^#" | sed 's/inventory_loc=//'); do cat $a/ContentsXML/inventory.xml | grep "HOME NAME" | grep -v 'REMOVED="T"'; done;
+
+echo Patch level
+for opath in $(cat /etc/oratab | grep -v "^#" | sed '/^$/d' | cut -d':' -f2 | sort | uniq); do echo $opath":";  $opath/OPatch/opatch lsinv  | grep 'Patch description' ;done
